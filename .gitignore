@@ -1,0 +1,17 @@
+# 빌드 결과
+dist/
+bin/
+obj/
+
+# Windows 잡파일
+Thumbs.db
+Desktop.ini
+
+# IDE 설정
+.vs/
+.idea/
+*.user
+*.suo
+
+# 로그
+*.log
