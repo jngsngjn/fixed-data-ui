@@ -11,7 +11,7 @@ if not exist "%CSC%" (
 
 if not exist dist mkdir dist
 
-"%CSC%" /nologo /target:winexe /optimize+ /codepage:65001 /win32icon:assets\app.ico /out:dist\FixedDataUi.exe /reference:System.dll /reference:System.Drawing.dll /reference:System.Windows.Forms.dll src\FixedDataUi.cs
+"%CSC%" /nologo /target:winexe /optimize+ /codepage:65001 /win32icon:assets\app.ico /out:dist\FixedDataUi.exe /reference:System.dll /reference:System.Drawing.dll /reference:System.Runtime.Serialization.dll /reference:System.Windows.Forms.dll src\FixedDataUi.cs
 if errorlevel 1 exit /b 1
 
 echo dist\FixedDataUi.exe created.

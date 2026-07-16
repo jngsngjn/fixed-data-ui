@@ -1,6 +1,10 @@
 using System;
+using System.Collections.Generic;
 using System.Drawing;
 using System.Globalization;
+using System.IO;
+using System.Runtime.Serialization;
+using System.Runtime.Serialization.Json;
 using System.Text;
 using System.Windows.Forms;
 
@@ -24,6 +28,7 @@ namespace FixedDataUi
         private readonly TextBox resultTextBox;
         private readonly Label byteCountLabel;
         private readonly Label statusLabel;
+        private readonly string automaticStatePath;
 
         public FixedDataForm()
         {
@@ -44,11 +49,16 @@ namespace FixedDataUi
                 Dock = DockStyle.Fill,
                 TextAlign = ContentAlignment.MiddleLeft
             };
+            automaticStatePath = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "FixedDataUi",
+                "last-input.json");
 
             Controls.Add(CreateMainLayout());
             Controls.Add(CreateFooterPanel());
 
-            AddSampleRows();
+            FormClosing += SaveLastInput;
+            LoadInitialState();
         }
 
         private Control CreateMainLayout()
@@ -159,6 +169,8 @@ namespace FixedDataUi
             panel.Controls.Add(CreateButton("행 추가", AddRow));
             panel.Controls.Add(CreateButton("선택 행 삭제", DeleteSelectedRows));
             panel.Controls.Add(CreateButton("전체 삭제", ClearRows));
+            panel.Controls.Add(CreateButton("내보내기", ExportState));
+            panel.Controls.Add(CreateButton("임포트", ImportState));
             panel.Controls.Add(CreatePaddingLabel());
             panel.Controls.Add(alignmentComboBox);
 
@@ -260,6 +272,153 @@ namespace FixedDataUi
             statusLabel.Text = "기본 예시가 입력되었습니다.";
         }
 
+        private void LoadInitialState()
+        {
+            if (!File.Exists(automaticStatePath))
+            {
+                AddSampleRows();
+                return;
+            }
+
+            try
+            {
+                ApplyState(FixedDataStateFile.Load(automaticStatePath));
+                statusLabel.Text = "마지막 입력값을 복원했습니다.";
+            }
+            catch (Exception ex)
+            {
+                AddSampleRows();
+                statusLabel.Text = "마지막 입력값을 복원하지 못했습니다: " + ex.Message;
+            }
+        }
+
+        private void SaveLastInput(object sender, FormClosingEventArgs e)
+        {
+            try
+            {
+                fieldGrid.EndEdit();
+                FixedDataStateFile.Save(automaticStatePath, CaptureState());
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(
+                    this,
+                    "마지막 입력값을 저장하지 못했습니다.\r\n" + ex.Message,
+                    "자동 저장 오류",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Warning);
+            }
+        }
+
+        private void ExportState(object sender, EventArgs e)
+        {
+            using (var dialog = new SaveFileDialog())
+            {
+                dialog.Filter = "JSON 파일 (*.json)|*.json|모든 파일 (*.*)|*.*";
+                dialog.DefaultExt = "json";
+                dialog.AddExtension = true;
+                dialog.FileName = "fixed-data.json";
+
+                if (dialog.ShowDialog(this) != DialogResult.OK)
+                {
+                    return;
+                }
+
+                try
+                {
+                    fieldGrid.EndEdit();
+                    FixedDataStateFile.Save(dialog.FileName, CaptureState());
+                    statusLabel.Text = "입력값을 JSON 파일로 내보냈습니다.";
+                }
+                catch (Exception ex)
+                {
+                    MessageBox.Show(
+                        this,
+                        "입력값을 내보내지 못했습니다.\r\n" + ex.Message,
+                        "내보내기 오류",
+                        MessageBoxButtons.OK,
+                        MessageBoxIcon.Error);
+                }
+            }
+        }
+
+        private void ImportState(object sender, EventArgs e)
+        {
+            using (var dialog = new OpenFileDialog())
+            {
+                dialog.Filter = "JSON 파일 (*.json)|*.json|모든 파일 (*.*)|*.*";
+                dialog.DefaultExt = "json";
+                dialog.CheckFileExists = true;
+
+                if (dialog.ShowDialog(this) != DialogResult.OK)
+                {
+                    return;
+                }
+
+                try
+                {
+                    FixedDataState state = FixedDataStateFile.Load(dialog.FileName);
+                    ApplyState(state);
+                    statusLabel.Text = "JSON 파일에서 입력값을 임포트했습니다.";
+                }
+                catch (Exception ex)
+                {
+                    MessageBox.Show(
+                        this,
+                        "입력값을 임포트하지 못했습니다.\r\n" + ex.Message,
+                        "임포트 오류",
+                        MessageBoxButtons.OK,
+                        MessageBoxIcon.Error);
+                }
+            }
+        }
+
+        private FixedDataState CaptureState()
+        {
+            var state = new FixedDataState
+            {
+                Version = FixedDataStateFile.CurrentVersion,
+                Alignment = alignmentComboBox.SelectedIndex == 1 ? "right" : "left",
+                Rows = new List<FixedDataRow>()
+            };
+
+            for (int i = 0; i < fieldGrid.Rows.Count; i++)
+            {
+                DataGridViewRow row = fieldGrid.Rows[i];
+                if (row.IsNewRow)
+                {
+                    continue;
+                }
+
+                state.Rows.Add(new FixedDataRow
+                {
+                    Length = Convert.ToString(row.Cells["lengthColumn"].Value, CultureInfo.InvariantCulture) ?? string.Empty,
+                    Value = Convert.ToString(row.Cells["valueColumn"].Value, CultureInfo.InvariantCulture) ?? string.Empty
+                });
+            }
+
+            return state;
+        }
+
+        private void ApplyState(FixedDataState state)
+        {
+            fieldGrid.Rows.Clear();
+            for (int i = 0; i < state.Rows.Count; i++)
+            {
+                FixedDataRow row = state.Rows[i];
+                fieldGrid.Rows.Add(row.Length, row.Value);
+            }
+
+            alignmentComboBox.SelectedIndex = state.Alignment == "right" ? 1 : 0;
+            ClearResult();
+        }
+
+        private void ClearResult()
+        {
+            resultTextBox.Clear();
+            byteCountLabel.Text = "바이트: 0";
+        }
+
         private void AddRow(object sender, EventArgs e)
         {
             int rowIndex = fieldGrid.Rows.Add("1", string.Empty);
@@ -306,8 +465,7 @@ namespace FixedDataUi
         private void ClearRows(object sender, EventArgs e)
         {
             fieldGrid.Rows.Clear();
-            resultTextBox.Clear();
-            byteCountLabel.Text = "바이트: 0";
+            ClearResult();
             statusLabel.Text = "전체 행과 결과를 삭제했습니다.";
         }
 
@@ -403,6 +561,97 @@ namespace FixedDataUi
                     brush,
                     e.RowBounds.Left + 14,
                     e.RowBounds.Top + 4);
+            }
+        }
+    }
+
+    [DataContract]
+    internal sealed class FixedDataState
+    {
+        [DataMember(Name = "version", Order = 1, IsRequired = true)]
+        public int Version { get; set; }
+
+        [DataMember(Name = "alignment", Order = 2, IsRequired = true)]
+        public string Alignment { get; set; }
+
+        [DataMember(Name = "rows", Order = 3, IsRequired = true)]
+        public List<FixedDataRow> Rows { get; set; }
+    }
+
+    [DataContract]
+    internal sealed class FixedDataRow
+    {
+        [DataMember(Name = "length", Order = 1, IsRequired = true)]
+        public string Length { get; set; }
+
+        [DataMember(Name = "value", Order = 2, IsRequired = true)]
+        public string Value { get; set; }
+    }
+
+    internal static class FixedDataStateFile
+    {
+        public const int CurrentVersion = 1;
+
+        public static FixedDataState Load(string path)
+        {
+            var serializer = new DataContractJsonSerializer(typeof(FixedDataState));
+            FixedDataState state;
+            using (var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read))
+            {
+                state = serializer.ReadObject(stream) as FixedDataState;
+            }
+
+            Validate(state);
+            return state;
+        }
+
+        public static void Save(string path, FixedDataState state)
+        {
+            Validate(state);
+
+            string directoryPath = Path.GetDirectoryName(path);
+            if (!string.IsNullOrEmpty(directoryPath))
+            {
+                Directory.CreateDirectory(directoryPath);
+            }
+
+            var serializer = new DataContractJsonSerializer(typeof(FixedDataState));
+            using (var stream = new FileStream(path, FileMode.Create, FileAccess.Write, FileShare.None))
+            {
+                serializer.WriteObject(stream, state);
+            }
+        }
+
+        private static void Validate(FixedDataState state)
+        {
+            if (state == null)
+            {
+                throw new InvalidDataException("JSON 상태가 비어 있습니다.");
+            }
+
+            if (state.Version != CurrentVersion)
+            {
+                throw new InvalidDataException("지원하지 않는 JSON 버전입니다.");
+            }
+
+            if (state.Alignment != "left" && state.Alignment != "right")
+            {
+                throw new InvalidDataException("alignment는 left 또는 right여야 합니다.");
+            }
+
+            if (state.Rows == null)
+            {
+                throw new InvalidDataException("rows 필드가 필요합니다.");
+            }
+
+            for (int i = 0; i < state.Rows.Count; i++)
+            {
+                FixedDataRow row = state.Rows[i];
+                if (row == null || row.Length == null || row.Value == null)
+                {
+                    throw new InvalidDataException(
+                        (i + 1).ToString(CultureInfo.InvariantCulture) + "행의 length와 value가 필요합니다.");
+                }
             }
         }
     }
